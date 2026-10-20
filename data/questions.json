@@ -1,0 +1,50 @@
+[
+  {
+    "topic": "Python Basics",
+    "text": "Which of these is a mutable data type in Python?",
+    "q_type": "mcq",
+    "correct_answer": "list",
+    "options": ["tuple", "list", "str", "int"],
+    "source": "Manual",
+    "active": true,
+    "times_shown": 4,
+    "times_correct": 3,
+    "id": "a1b2c3d4"
+  },
+  {
+    "topic": "Python Basics",
+    "text": "What keyword is used to define a function in Python?",
+    "q_type": "mcq",
+    "correct_answer": "def",
+    "options": ["func", "def", "function", "lambda"],
+    "source": "Manual",
+    "active": true,
+    "times_shown": 2,
+    "times_correct": 2,
+    "id": "e5f6a7b8"
+  },
+  {
+    "topic": "Python Dictionaries",
+    "text": "Explain the difference between a dictionary's keys() and items() methods.",
+    "q_type": "freeform",
+    "correct_answer": "keys() returns a view of just the dictionary's keys, while items() returns a view of (key, value) tuple pairs.",
+    "options": [],
+    "source": "Manual",
+    "active": true,
+    "times_shown": 3,
+    "times_correct": 1,
+    "id": "c9d0e1f2"
+  },
+  {
+    "topic": "Linear Regression Basics",
+    "text": "What does the coefficient of a feature represent in a simple linear regression model?",
+    "q_type": "freeform",
+    "correct_answer": "It represents the expected change in the target variable for a one-unit increase in that feature, holding other features constant.",
+    "options": [],
+    "source": "Manual",
+    "active": false,
+    "times_shown": 0,
+    "times_correct": 0,
+    "id": "b3a4c5d6"
+  }
+]
