@@ -9,6 +9,10 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
+from rich.console import Console
+from rich.markup import escape
+from rich.table import Table
+
 from learning_companion import config
 from learning_companion.llm_client import LLMError
 from learning_companion.models import Question
@@ -25,6 +29,8 @@ MENU = """
 5) Manage Questions (Enable/Disable/List)
 6) Quit
 """
+
+console = Console()
 
 
 def build_manager() -> QuizManager:
@@ -100,19 +106,44 @@ def generate_questions_flow(manager: QuizManager) -> None:
 # ---------------------------------------------------------------------
 def view_statistics(manager: QuizManager) -> None:
     if not manager.questions:
-        print("No questions saved yet.")
+        console.print("[yellow]No questions saved yet.[/yellow]")
         return
-    print("\n" + "=" * 100)
-    header = f"{'ID':10}{'Active':8}{'Type':10}{'Source':8}{'Shown':7}{'Correct%':10}{'Topic':20}Question"
-    print(header)
-    print("-" * 100)
+
+    table = Table(title="Question Statistics")
+    table.add_column("ID", style="dim")
+    table.add_column("Active", justify="center")
+    table.add_column("Type")
+    table.add_column("Source")
+    table.add_column("Shown", justify="right")
+    table.add_column("Correct %", justify="right")
+    table.add_column("Topic")
+    table.add_column("Question")
+
     for q in manager.questions:
-        status = "Yes" if q.active else "No"
-        print(
-            f"{q.id:10}{status:8}{q.q_type:10}{q.source:8}{q.times_shown:<7}"
-            f"{q.correct_percentage:<10}{q.topic[:18]:20}{q.text[:50]}"
+        status = "[green]Yes[/green]" if q.active else "[red]No[/red]"
+
+        # Color the score: green = doing well, yellow = so-so, red = needs practice
+        if q.times_shown == 0:
+            score = "[dim]-[/dim]"
+        elif q.correct_percentage >= 70:
+            score = f"[green]{q.correct_percentage}%[/green]"
+        elif q.correct_percentage >= 40:
+            score = f"[yellow]{q.correct_percentage}%[/yellow]"
+        else:
+            score = f"[red]{q.correct_percentage}%[/red]"
+
+        table.add_row(
+            q.id,
+            status,
+            q.q_type,
+            q.source,
+            str(q.times_shown),
+            score,
+            escape(q.topic),
+            escape(q.text),
         )
-    print("=" * 100)
+
+    console.print(table)
 
 
 # ---------------------------------------------------------------------
