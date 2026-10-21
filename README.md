@@ -1,64 +1,44 @@
 # AI-Powered Learning Companion
 
 A command-line study tool that uses an LLM (OpenAI's API) to generate quiz
-questions on any topic, evaluate freeform answers, and track your progress
-over time via weighted practice and randomized tests.
+questions on any topic, grade freeform answers, and track your progress over
+time with weighted practice and randomized tests.
 
 ## Features
 
-- **Generate Questions (LLM)** — enter a topic, get a mix of MCQ + freeform
-  questions from the LLM, review/edit/accept each one before it's saved.
-- **View Statistics** — see every saved question: ID, active status, topic,
-  type, source (LLM/Manual), times shown, and correct-answer percentage.
-- **Practice Mode** — endless practice with *weighted* question selection:
-  questions you get wrong more often show up more often; ones you've
-  mastered fade into the background.
-- **Test Mode** — pick how many questions you want, answered once each with
-  no repeats, final score is printed and appended to `data/results.txt`.
-- **Manage Questions** — list all questions, or enable/disable a specific
-  question by ID (with a confirmation step showing the question first).
-  Disabled questions never appear in Practice or Test mode.
-
-## Project layout
-
-```
-learning_companion/
-├── main.py                        # CLI entry point / menu loop
-├── learning_companion/
-│   ├── models.py                  # Question dataclass (OOP model)
-│   ├── llm_client.py              # LLMClient: all OpenAI API calls + error handling
-│   ├── quiz_manager.py            # QuizManager: selection/evaluation/scoring logic
-│   ├── storage.py                 # QuestionStore + ResultsLog: file persistence
-│   └── config.py                  # Loads API key / settings from environment
-├── tests/                         # Unit tests (no network calls required)
-├── data/
-│   ├── questions.json             # Persisted question bank (sample data included)
-│   └── results.txt                # Append-only test-mode score log
-├── requirements.txt
-├── .env.example                   # Template for your local .env (never committed)
-└── .gitignore                     # Excludes .env, __pycache__, venvs, etc.
-```
+- **Generate Questions (LLM)**: enter a topic and get a mix of multiple-choice
+  and freeform questions. Review, edit or reject each one before it's saved.
+- **View Statistics**: a colour-coded table of every saved question: ID,
+  active status, type, source, times shown, correct percentage and topic.
+- **Practice Mode**: endless practice with *weighted* selection. Questions
+  you miss more often come up more often; ones you've mastered fade back.
+- **Test Mode**: choose how many questions, answer each once with no
+  repeats, and your score is appended to `data/results.txt`.
+- **Manage Questions**: list all questions, or enable/disable one by ID
+  after a confirmation step. Disabled questions never appear in Practice or
+  Test mode.
 
 ## Setup
 
-1. **Clone the repo and install dependencies:**
+1. **Create a virtual environment and install the project:**
 
    ```bash
-   pip install -r requirements.txt
+   python -m venv venv
+   source venv/Scripts/activate      # Windows Git Bash. Mac/Linux: source venv/bin/activate
+   pip install -e ".[dev]"
    ```
 
-2. **Provide your OpenAI API key.** Copy `.env.example` to `.env` and fill
-   in your key (or just export it as a real environment variable):
+   `-e` installs the project in editable mode, and `[dev]` adds the test tools.
+
+2. **Add your OpenAI API key.** Copy `.env.example` to `.env` and put your
+   key there. `.env` is listed in `.gitignore`, so it is never committed.
 
    ```bash
    cp .env.example .env
-   # then edit .env and set OPENAI_API_KEY=sk-...
    ```
 
-   The key is never hardcoded and `.env` is listed in `.gitignore`, so it
-   won't be committed. `Generate Questions`, `Practice Mode`, and
-   `Test Mode` (for freeform questions) all require a valid key; every
-   other mode works fully offline against the local `data/questions.json`.
+   Generating questions and grading freeform answers need a key. Everything
+   else works offline against `data/questions.json`.
 
 3. **Run it:**
 
@@ -66,57 +46,78 @@ learning_companion/
    python main.py
    ```
 
-## How the pieces fit together (OOP overview)
-
-- `Question` (`models.py`) — a dataclass holding one question's text, type,
-  options, correct answer, active flag, and running stats. Exposes
-  `correct_percentage` and `is_mcq` as computed properties, plus
-  `record_attempt()` / `set_active()` mutators and `to_dict()`/`from_dict()`
-  for JSON persistence.
-- `LLMClient` (`llm_client.py`) — wraps all calls to the OpenAI Chat
-  Completions API. `generate_questions()` prompts the model for strict JSON
-  and parses/validates it into plain dicts; `evaluate_freeform()` sends the
-  question, reference answer, and user answer, and parses a `{"verdict":
-  ..., "explanation": ...}` JSON judgment. All network/auth/rate-limit
-  failures are caught and re-raised as a single `LLMError` so the rest of
-  the app never has to know about `openai`-specific exceptions.
-- `QuestionStore` / `ResultsLog` (`storage.py`) — read/write
-  `data/questions.json` and append lines to `data/results.txt`.
-- `QuizManager` (`quiz_manager.py`) — the orchestrator. Holds the in-memory
-  list of `Question` objects, talks to `LLMClient` only when needed
-  (lazily, so unit tests never require an API key), and implements the
-  selection/evaluation logic:
-  - `compute_weight()` / `weighted_choice()` — pure functions implementing
-    the weighted-random Practice mode selection (higher weight for unseen
-    or frequently-missed questions).
-  - `pick_test_questions()` — random sample without replacement for Test
-    mode.
-  - `evaluate_mcq()` — direct string comparison.
-  - `evaluate_freeform()` — delegates to the LLM, degrades gracefully to
-    "incorrect + explanation" if the API call fails.
-- `main.py` — thin CLI layer: menu loop + `input()`/`print()` for each of
-  the five modes, all glued together through a single `QuizManager`
-  instance.
-
 ## Running the tests
 
 ```bash
-python -m unittest discover -s tests -v
+python -m pytest
 ```
 
-The test suite (`tests/test_models.py`, `tests/test_quiz_manager.py`,
-`tests/test_storage.py`) covers MCQ evaluation, the weighted-selection
-logic, enable/disable persistence, and JSON save/load round-tripping —
-none of it requires network access or an API key.
+The tests never call the real API: the OpenAI SDK is mocked. They cover
+error handling (authentication failure, rate limits, network errors, model
+refusals), question validation, the response schemas, prompt building,
+weighted selection, persistence, and the statistics table.
 
-## Notes on error handling
+## Evaluating the prompts
 
-`LLMClient` catches `AuthenticationError`, `RateLimitError`,
-`APIConnectionError`, and generic `APIError` from the OpenAI SDK and
-re-raises them as a single `LLMError` with a human-readable message, which
-`main.py` catches and prints without crashing the program. Freeform
-evaluation failures during Practice/Test mode are treated as "could not
-verify" rather than silently crashing the session.
+`evals/cases.json` holds a small, repeatable set of grading and
+question-generation cases, including a prompt-injection attempt. After
+changing a prompt, bump `PROMPT_VERSION` in `prompts.py` and run:
+
+```bash
+python -m scripts.run_evals
+```
+
+This calls the real API (a few cents) and prints a pass/fail table.
+
+## Project layout
+
+```
+learning_companion/
+├── main.py                      # Entry point: python main.py
+├── pyproject.toml               # Dependencies, Python version, pytest settings
+├── learning_companion/
+│   ├── config.py                # Loads the API key and settings from .env
+│   ├── models.py                # Question dataclass
+│   ├── schemas.py               # Pydantic shapes for the LLM's replies
+│   ├── prompts.py               # Versioned prompt templates
+│   ├── llm_client.py            # All OpenAI calls and error handling
+│   ├── quiz_manager.py          # Selection, grading and scoring logic
+│   ├── storage.py               # Saves questions and test results
+│   └── cli/                     # One small file per menu feature
+│       ├── app.py               # Menu loop
+│       ├── terminal.py          # Shared Rich console and input helpers
+│       ├── generate.py          # 1) Generate Questions
+│       ├── stats.py             # 2) View Statistics
+│       ├── quiz.py              # 3) Practice Mode and 4) Test Mode
+│       └── manage.py            # 5) Manage Questions
+├── tests/                       # Unit tests (no network, no API key)
+├── evals/cases.json             # Prompt evaluation cases
+├── scripts/run_evals.py         # Runs the evaluation cases against the real API
+└── data/
+    ├── questions.json           # Question bank (sample data included)
+    └── results.txt              # Test-mode score log
+```
+
+## How it works
+
+- **Structured Outputs.** `llm_client.py` sends each request with a Pydantic
+  schema from `schemas.py`, so the model must reply in exactly that shape and
+  the OpenAI SDK returns a parsed object. There is no hand-written JSON
+  parsing. A small `is_usable()` check then drops questions whose content
+  doesn't make sense, such as a multiple-choice answer that isn't one of the
+  options.
+- **One error type.** Authentication failures, rate limits, network errors,
+  model refusals and empty replies all become a single `LLMError` with a
+  readable message, so the rest of the app never imports `openai`.
+- **Failed grading is not a wrong answer.** If the LLM can't grade a
+  freeform answer, the attempt is not recorded, so your statistics stay
+  accurate.
+- **Prompt-injection guard.** The grading prompt puts the student's answer
+  inside `<student_answer>` tags and tells the model to treat it as text to
+  grade, never as instructions.
+- **Separated layers.** `QuizManager` holds the logic and never prints or
+  reads input; the `cli/` package handles the terminal. This keeps the logic
+  easy to test and each file short.
 
 ---
 

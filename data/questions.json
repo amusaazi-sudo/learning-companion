@@ -4,7 +4,12 @@
     "text": "Which of these is a mutable data type in Python?",
     "q_type": "mcq",
     "correct_answer": "list",
-    "options": ["tuple", "list", "str", "int"],
+    "options": [
+      "tuple",
+      "list",
+      "str",
+      "int"
+    ],
     "source": "Manual",
     "active": true,
     "times_shown": 4,
@@ -16,7 +21,12 @@
     "text": "What keyword is used to define a function in Python?",
     "q_type": "mcq",
     "correct_answer": "def",
-    "options": ["func", "def", "function", "lambda"],
+    "options": [
+      "func",
+      "def",
+      "function",
+      "lambda"
+    ],
     "source": "Manual",
     "active": true,
     "times_shown": 2,
@@ -46,5 +56,73 @@
     "times_shown": 0,
     "times_correct": 0,
     "id": "b3a4c5d6"
+  },
+  {
+    "topic": "python lists",
+    "text": "What method would you use to add an item to the end of a Python list?",
+    "q_type": "mcq",
+    "correct_answer": "append()",
+    "options": [
+      "append()",
+      "add()",
+      "insert()",
+      "extend()"
+    ],
+    "source": "LLM",
+    "active": true,
+    "times_shown": 0,
+    "times_correct": 0,
+    "id": "c1550e91"
+  },
+  {
+    "topic": "python lists",
+    "text": "How can you access the first element of a list named 'my_list'?",
+    "q_type": "mcq",
+    "correct_answer": "my_list[0]",
+    "options": [
+      "my_list[0]",
+      "my_list[1]",
+      "my_list.first()",
+      "my_list.first"
+    ],
+    "source": "LLM",
+    "active": true,
+    "times_shown": 0,
+    "times_correct": 0,
+    "id": "908fbdf1"
+  },
+  {
+    "topic": "python lists",
+    "text": "Which method would you call to remove an item from a list by its value?",
+    "q_type": "mcq",
+    "correct_answer": "remove()",
+    "options": [
+      "remove()",
+      "delete()",
+      "pop()",
+      "discard()"
+    ],
+    "source": "LLM",
+    "active": true,
+    "times_shown": 0,
+    "times_correct": 0,
+    "id": "d31bddd7"
+  },
+  {
+    "topic": "python lists",
+    "text": "What will be the output of the following code: my_list = [1, 2, 3]; print(my_list[1])?",
+    "q_type": "mcq",
+    "correct_answer": "2",
+    "options": [
+      "1",
+      "2",
+      "3",
+      "Error"
+    ],
+    "source": "LLM",
+    "active": true,
+    "times_shown": 0,
+    "times_correct": 0,
+    "id": "38571938"
   }
 ]

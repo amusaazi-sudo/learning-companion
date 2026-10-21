@@ -1,116 +1,131 @@
-"""Tests for LLMClient that never touch the real network.
-
-All OpenAI-facing behavior is exercised through unittest.mock, either by
-patching LLMClient._chat directly (to test parsing/validation) or by
-patching the underlying OpenAI SDK client (to test error translation).
-"""
+"""Tests for LLMClient. The OpenAI SDK is always mocked, so no network or API key is used."""
 
 import unittest
 from unittest.mock import MagicMock, patch
 
+from openai import APIConnectionError, AuthenticationError, RateLimitError
+
 from learning_companion.llm_client import LLMClient, LLMError
+from learning_companion.schemas import EvaluationResponse, GeneratedQuestion, QuestionGenerationResponse
 
 
 def make_client() -> LLMClient:
-    """Build an LLMClient without needing a real API key or network call."""
-    with patch("learning_companion.llm_client.OpenAI") as mock_openai_cls:
-        mock_openai_cls.return_value = MagicMock()
-        return LLMClient(api_key="test-key-not-real")
+    with patch("learning_companion.llm_client.OpenAI"):
+        return LLMClient(api_key="test-key-not-real", model="test-model")
 
 
-class TestExtractJson(unittest.TestCase):
-    def setUp(self):
-        self.client = make_client()
+def reply(parsed=None, refusal=None):
+    """Build a fake SDK response holding one message."""
+    message = MagicMock(parsed=parsed, refusal=refusal)
+    return MagicMock(choices=[MagicMock(message=message)])
 
-    def test_parses_clean_json_array(self):
-        raw = '[{"q_type": "mcq", "text": "q", "options": ["a", "b"], "correct_answer": "a"}]'
-        result = self.client._extract_json(raw)
-        self.assertEqual(result[0]["text"], "q")
 
-    def test_strips_markdown_code_fence(self):
-        raw = '```json\n[{"q_type": "freeform", "text": "q", "options": [], "correct_answer": "a"}]\n```'
-        result = self.client._extract_json(raw)
-        self.assertEqual(result[0]["q_type"], "freeform")
+def sdk_error(cls):
+    """Create an OpenAI exception without its real constructor, which needs HTTP
+    objects whose library changes between SDK versions. Our code only checks the
+    exception's type and message, so that is all we set."""
+    error = cls.__new__(cls)
+    Exception.__init__(error, "simulated")
+    return error
 
-    def test_extracts_json_from_surrounding_commentary(self):
-        raw = 'Sure, here you go:\n[{"q_type": "mcq", "text": "q", "options": ["a", "b"], "correct_answer": "a"}]\nHope that helps!'
-        result = self.client._extract_json(raw)
-        self.assertEqual(result[0]["q_type"], "mcq")
 
-    def test_raises_llm_error_on_unparseable_garbage(self):
+def mcq(text="Q", options=("a", "b", "c", "d"), answer="a"):
+    return GeneratedQuestion(q_type="mcq", text=text, options=list(options), correct_answer=answer)
+
+
+def freeform(text="Q", answer="A model answer"):
+    return GeneratedQuestion(q_type="freeform", text=text, options=[], correct_answer=answer)
+
+
+class TestErrorHandling(unittest.TestCase):
+    """Every failure must become one LLMError with a helpful message."""
+
+    def assert_llm_error(self, side_effect, expected_words):
+        client = make_client()
+        client._client.chat.completions.parse = MagicMock(side_effect=side_effect)
+        with self.assertRaises(LLMError) as ctx:
+            client.evaluate_freeform("Q", "ref", "answer")
+        self.assertIn(expected_words, str(ctx.exception))
+
+    def test_authentication_failure(self):
+        self.assert_llm_error(sdk_error(AuthenticationError), "Authentication failed")
+
+    def test_rate_limit(self):
+        self.assert_llm_error(sdk_error(RateLimitError), "Rate limit")
+
+    def test_network_failure(self):
+        self.assert_llm_error(sdk_error(APIConnectionError), "network issue")
+
+    def test_unexpected_exception(self):
+        self.assert_llm_error(RuntimeError("boom"), "Unexpected error")
+
+    def test_model_refusal(self):
+        client = make_client()
+        client._client.chat.completions.parse = MagicMock(return_value=reply(refusal="I can't help with that."))
+        with self.assertRaises(LLMError) as ctx:
+            client.evaluate_freeform("Q", "ref", "answer")
+        self.assertIn("declined", str(ctx.exception))
+
+    def test_empty_parsed_answer(self):
+        client = make_client()
+        client._client.chat.completions.parse = MagicMock(return_value=reply(parsed=None))
         with self.assertRaises(LLMError):
-            self.client._extract_json("this is not json at all {{{")
+            client.evaluate_freeform("Q", "ref", "answer")
 
 
-class TestGenerateQuestionsValidation(unittest.TestCase):
-    def setUp(self):
-        self.client = make_client()
+class TestGenerateQuestions(unittest.TestCase):
+    def generate(self, *questions):
+        client = make_client()
+        parse = MagicMock(return_value=reply(parsed=QuestionGenerationResponse(questions=list(questions))))
+        client._client.chat.completions.parse = parse
+        return client.generate_questions("topic", 1, 1), parse
 
-    def test_drops_items_missing_required_fields(self):
-        good = {"q_type": "mcq", "text": "Q1", "options": ["a", "b"], "correct_answer": "a"}
-        missing_answer = {"q_type": "mcq", "text": "Q2", "options": ["a", "b"], "correct_answer": ""}
-        with patch.object(self.client, "_chat", return_value="ignored"), \
-             patch.object(self.client, "_extract_json", return_value=[good, missing_answer]):
-            result = self.client.generate_questions("topic", 1, 0)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["text"], "Q1")
+    def test_sends_the_question_schema(self):
+        _, parse = self.generate(mcq())
+        self.assertIs(parse.call_args.kwargs["response_format"], QuestionGenerationResponse)
+
+    def test_returns_plain_dicts(self):
+        result, _ = self.generate(mcq(), freeform())
+        self.assertEqual([q["q_type"] for q in result], ["mcq", "freeform"])
+        self.assertEqual(result[1]["options"], [])
+
+    def test_drops_mcq_whose_answer_is_not_an_option(self):
+        result, _ = self.generate(mcq(text="good"), mcq(text="bad", answer="z"))
+        self.assertEqual([q["text"] for q in result], ["good"])
 
     def test_drops_mcq_with_fewer_than_two_options(self):
-        bad_mcq = {"q_type": "mcq", "text": "Q", "options": ["only-one"], "correct_answer": "only-one"}
-        with patch.object(self.client, "_chat", return_value="ignored"), \
-             patch.object(self.client, "_extract_json", return_value=[bad_mcq]):
-            with self.assertRaises(LLMError):
-                self.client.generate_questions("topic", 1, 0)
+        result, _ = self.generate(mcq(text="good"), mcq(text="bad", options=["a"]))
+        self.assertEqual([q["text"] for q in result], ["good"])
 
-    def test_raises_if_response_is_not_a_list(self):
-        with patch.object(self.client, "_chat", return_value="ignored"), \
-             patch.object(self.client, "_extract_json", return_value={"not": "a list"}):
-            with self.assertRaises(LLMError):
-                self.client.generate_questions("topic", 1, 0)
+    def test_drops_blank_questions(self):
+        result, _ = self.generate(freeform(text="good"), freeform(text="   "))
+        self.assertEqual(len(result), 1)
+
+    def test_raises_when_nothing_is_usable(self):
+        with self.assertRaises(LLMError):
+            self.generate(mcq(answer="not-an-option"))
 
 
 class TestEvaluateFreeform(unittest.TestCase):
-    def setUp(self):
-        self.client = make_client()
+    def evaluate(self, verdict, explanation="Because."):
+        client = make_client()
+        parse = MagicMock(return_value=reply(parsed=EvaluationResponse(verdict=verdict, explanation=explanation)))
+        client._client.chat.completions.parse = parse
+        return client.evaluate_freeform("Q", "ref", "answer"), parse
 
-    def test_returns_true_on_correct_verdict(self):
-        with patch.object(self.client, "_chat", return_value="ignored"), \
-             patch.object(self.client, "_extract_json",
-                          return_value={"verdict": "correct", "explanation": "Nice work."}):
-            is_correct, explanation = self.client.evaluate_freeform("Q", "ref", "answer")
+    def test_correct_verdict(self):
+        (is_correct, explanation), _ = self.evaluate("correct", " Nice work. ")
         self.assertTrue(is_correct)
         self.assertEqual(explanation, "Nice work.")
 
-    def test_returns_false_on_incorrect_verdict(self):
-        with patch.object(self.client, "_chat", return_value="ignored"), \
-             patch.object(self.client, "_extract_json",
-                          return_value={"verdict": "incorrect", "explanation": "Missed the key point."}):
-            is_correct, _ = self.client.evaluate_freeform("Q", "ref", "answer")
+    def test_incorrect_verdict(self):
+        (is_correct, _), _ = self.evaluate("incorrect")
         self.assertFalse(is_correct)
 
-    def test_raises_if_verdict_key_missing(self):
-        with patch.object(self.client, "_chat", return_value="ignored"), \
-             patch.object(self.client, "_extract_json", return_value={"explanation": "no verdict here"}):
-            with self.assertRaises(LLMError):
-                self.client.evaluate_freeform("Q", "ref", "answer")
-
-
-class TestChatErrorTranslation(unittest.TestCase):
-    """Confirms real SDK exceptions get translated into a single LLMError type."""
-
-    def test_generic_exception_becomes_llm_error(self):
-        client = make_client()
-        client._client.chat.completions.create = MagicMock(side_effect=RuntimeError("boom"))
-        with self.assertRaises(LLMError):
-            client._chat("system", "user")
-
-    def test_empty_response_content_raises_llm_error(self):
-        client = make_client()
-        fake_response = MagicMock()
-        fake_response.choices = [MagicMock(message=MagicMock(content=""))]
-        client._client.chat.completions.create = MagicMock(return_value=fake_response)
-        with self.assertRaises(LLMError):
-            client._chat("system", "user")
+    def test_grading_is_deterministic_and_uses_the_evaluation_schema(self):
+        _, parse = self.evaluate("correct")
+        self.assertEqual(parse.call_args.kwargs["temperature"], 0.0)
+        self.assertIs(parse.call_args.kwargs["response_format"], EvaluationResponse)
 
 
 if __name__ == "__main__":
